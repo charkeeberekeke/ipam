@@ -11,6 +11,21 @@ HOME = os.path.expanduser("~")
 LOG = os.path.join(HOME, "log")
 """
 
+class InvalidIPError(Exception):
+    pass
+
+class AssignedIPnotinSubnet(Exception):
+    pass
+
+class InvalidNodeTypeError(Exception):
+    pass
+
+class CantAddParentlessNodeError(Exception):
+    pass
+
+class ConfirmDeleteNodeError(Exception):
+    pass
+
 class Domain:
     """
     Container class for domain object with an etree representation of xml structure of nodes and networks
@@ -52,10 +67,12 @@ class Domain:
         Accepts ip address in string format, returns None if invalid ip
         otherwise return IPv4Network object representing ip
         """
+        ip = (ip == "") and "0.0.0.0/0" or ip
         try:
             net = IPv4Network(ip)
         except:
-            return None
+            raise InvalidIPError(ip) 
+            #return None
         else:
             return net
 
@@ -66,9 +83,19 @@ class Domain:
         """
         _super = IPv4Network(supernet)
         _net = IPv4Network(net)
-        return (_net in _super) and (_net.prefixlen > _super.prefixlen)
+        #return (_net in _super) and (_net.prefixlen > _super.prefixlen)
+        if (_net in _super) and (_net.prefixlen >= _super.prefixlen):
+            return True
+        else:
+            raise AssignedIPnotinSubnet("%s in %s" % (net, supernet)) 
 
-    def add_node(self, node_type=None, parent=None, name="", network=None):
+    def _is_unique_amongst_siblings(self, name=None, network=None, parent=None):
+        ret = False
+        if isinstance(parent, etree._Element):
+            pass
+            #            for s 
+
+    def add_node(self, node_type=None, parent=None, name="", network=""):
         """
         Add node into the tree. Node type must conform to the schema.
         Return element represeting the node
@@ -76,13 +103,25 @@ class Domain:
         child = None
         network = self._validated_ip(network) and network or "0.0.0.0/0"
 
-        if name and node_type in self.groups:
+        if node_type not in self.groups:
+            raise InvalidNodeTypeError(node_type)
+
+        if name:
+            """
+            Test for the following conditions:
+            (1) parent is an etree element instance
+            (2) node_type is direct descendant/child of parent node_type
+            (3) network is a subnet of parent network
+            (4) network doesn't overlap node siblings
+            (5) name is unique amongst node siblibgs
+            """
             if (isinstance(parent, etree._Element) and (self.groups.index(node_type) == self.groups.index(parent.tag) + 1) 
                     and self._is_subnet(parent.get("network"), network)):
-                # add another condition in that the child network must be a subnet of the parent network
                 child = etree.Element(node_type, name=name, network=network)
                 parent.append(child)
-            elif parent is None and (self.groups.index(node_type) == 0):
+            elif parent is None:
+                if self.groups.index(node_type) != 0:
+                    raise CantAddParentlessNodeError(node_type)
                 child = etree.Element(node_type, name=name, network=network)
                 self.root.append(child)
 
@@ -99,14 +138,56 @@ class Domain:
             else:
                 q = "//%s" % node_type
             node = self.root.xpath(q)
+        elif network: # may need to improve the logic behind selection of name/nodetype vs network search
+            pass
+
+        return node
+
+    def _search_network(self, network, node):
+        for c in node.getchildren():
+            try:
+                if self._is_subnet(c.get("network"), network):
+                    node = self._search_network(network, c)
+            except AssignedIPnotinSubnet:
+                continue
 
         return node
         
     def set_node(self, node=None, **kwargs):
         """
         Change given node according to new properties set in kwargs
+        Can change node name safely
+        Node_type change not allowed
+        Network change  will involve validation for ip address rules
         """
-        pass
+        ret = None
+        if isinstance(node, etree._Element):
+            if "network" in kwargs and self._validated_ip(kwargs["network"]):
+                if len(node): 
+                    # if node has children, may need to research more reliable way of doing this
+                    for c in node.getchildren():
+                        if not self._is_subnet(kwargs["network"], c.get("network")):
+                            return ret
+                if self.groups.index(node.tag) and not self._is_subnet(node.getparent().get("network"), kwargs["network"]):
+                    # if node_type is not first in group and node is not subnet of parent node network
+                    return ret
+                node.set("network", kwargs["network"])
+                ret = node
+            if "name" in kwargs:
+                node.set("name", kwargs["name"])
+                ret = node
+
+        return ret
+
+    def remove_node(self, node=None, force=False):
+        ret = None
+        if isinstance(node, etree._Element):
+            if not force:
+                raise ConfirmDeleteNodeError(node)
+            node.getparent().remove(node)
+            ret = node
+
+        return ret
 
     def get_available_networks(self, node=None, prefixlen=None):
         """
