@@ -26,6 +26,9 @@ class CantAddParentlessNodeError(Exception):
 class ConfirmDeleteNodeError(Exception):
     pass
 
+class DuplicateSiblingError(Exception):
+    pass
+
 class Domain:
     """
     Container class for domain object with an etree representation of xml structure of nodes and networks
@@ -76,7 +79,7 @@ class Domain:
         else:
             return net
 
-    def _is_subnet(self, supernet, net):
+    def _is_subnet(self, supernet, net, raise_exception=True):
         """
         Tests if net is subnet of supernet.
         Does the native test in IPv4Address as well as ensure net prefix is longer than supernet
@@ -87,13 +90,31 @@ class Domain:
         if (_net in _super) and (_net.prefixlen >= _super.prefixlen):
             return True
         else:
-            raise AssignedIPnotinSubnet("%s in %s" % (net, supernet)) 
+            if raise_exception:
+                raise AssignedIPnotinSubnet("%s in %s" % (net, supernet)) 
+            else:
+                return False
 
     def _is_unique_amongst_siblings(self, name=None, network=None, parent=None):
+        """
+        determines whether provided name and network are unique among given parent's children nodes
+        network parameter should already be validated by calling function add_node
+        name comparision is case-insensitive
+        """
         ret = False
         if isinstance(parent, etree._Element):
-            pass
-            #            for s 
+            test_name = name.lower()
+            for s in parent:
+                _name = s.get("name")
+                _network = s.get("network")
+                if test_name == _name.lower():
+                    raise DuplicateSiblingError("name:%s" % name)
+                if self._is_subnet(s.get("network"), network, raise_exception=False) or (IPv4Network(network) == IPv4Network(_network)):
+                    raise DuplicateSiblingError("network:%s" % _network)
+
+            ret = True
+
+        return ret    
 
     def add_node(self, node_type=None, parent=None, name="", network=""):
         """
@@ -112,11 +133,10 @@ class Domain:
             (1) parent is an etree element instance
             (2) node_type is direct descendant/child of parent node_type
             (3) network is a subnet of parent network
-            (4) network doesn't overlap node siblings
-            (5) name is unique amongst node siblibgs
+            (4) name/network is unique amongst siblings
             """
             if (isinstance(parent, etree._Element) and (self.groups.index(node_type) == self.groups.index(parent.tag) + 1) 
-                    and self._is_subnet(parent.get("network"), network)):
+                    and self._is_subnet(parent.get("network"), network) and self._is_unique_amongst_siblings(name=name, network=network, parent=parent)):
                 child = etree.Element(node_type, name=name, network=network)
                 parent.append(child)
             elif parent is None:
@@ -162,6 +182,7 @@ class Domain:
         """
         ret = None
         if isinstance(node, etree._Element):
+            # add a case for changing root element attribute(s)
             if "network" in kwargs and self._validated_ip(kwargs["network"]):
                 if len(node): 
                     # if node has children, may need to research more reliable way of doing this

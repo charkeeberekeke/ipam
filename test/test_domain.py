@@ -41,6 +41,24 @@ class TestDomain:
     def test_create_node_3(self):
         self.domain.add_node(node_type="City", name="Melbourne")
 
+    @raises(DuplicateSiblingError)
+    def test_create_node_4(self):
+        self.reset()
+        parent = self.domain.get_node(node_type="Region", name="Australia")[0]
+        self.domain.add_node(node_type="City", name="brisbane", network="10.14.0.0/16", parent=parent)
+
+    @raises(DuplicateSiblingError)
+    def test_create_node_5(self):
+        self.reset()
+        parent = self.domain.get_node(node_type="Region", name="Australia")[0]
+        self.domain.add_node(node_type="City", name="Mackay", network="10.0.0.0/19", parent=parent)
+
+    @raises(DuplicateSiblingError)
+    def test_create_node_6(self):
+        self.reset()
+        parent = self.domain.get_node(node_type="Region", name="Australia")[0]
+        self.domain.add_node(node_type="City", name="Mackay", network="10.0.3.0/24", parent=parent)
+
     @raises(InvalidIPError)
     def test_ip_validate(self):
         self.domain.add_node(node_type="Region", name="Asia", network="non-IP string")
@@ -54,9 +72,6 @@ class TestDomain:
     def test_child_subnet_validate(self):
         parent = self.domain.add_node(node_type="Region", name="Asia", network="10.16.0.0/12")
         self.domain.add_node(node_type="City", name="Shanghai", network="10.128.0.0/21", parent=parent)
-
-    # add test to ensure no network overlaps between sibling nodes
-    # add test to ensure no `name` field overlaps/duplicate between sibling nodes
 
     def test_child_subnet_validate2(self):
         parent = self.domain.add_node(node_type="Region", name="Africa", network="10.32.0.0/12")
