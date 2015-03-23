@@ -84,6 +84,7 @@ class Domain:
         Tests if net is subnet of supernet.
         Does the native test in IPv4Address as well as ensure net prefix is longer than supernet
         """
+        need to change default network, 0.0.0.0/0 introduces subtle issues
         _super = IPv4Network(supernet)
         _net = IPv4Network(net)
         #return (_net in _super) and (_net.prefixlen > _super.prefixlen)
@@ -95,9 +96,9 @@ class Domain:
             else:
                 return False
 
-    def _is_unique_amongst_siblings(self, name=None, network=None, parent=None):
+    def _is_unique_amongst_siblings(self, name="", network="0.0.0.0/0", parent=None):
         """
-        determines whether provided name and network are unique among given parent's children nodes
+        determines whether provided name and network (non-overlapping) are unique among given parent's children nodes
         network parameter should already be validated by calling function add_node
         name comparision is case-insensitive
         """
@@ -109,7 +110,9 @@ class Domain:
                 _network = s.get("network")
                 if test_name == _name.lower():
                     raise DuplicateSiblingError("name:%s" % name)
-                if self._is_subnet(s.get("network"), network, raise_exception=False) or (IPv4Network(network) == IPv4Network(_network)):
+                if (self._is_subnet(s.get("network"), network, raise_exception=False)
+                    or self._is_subnet(network, s.get("network"), raise_exception=False)
+                    or (IPv4Network(network) == IPv4Network(_network))):
                     raise DuplicateSiblingError("network:%s" % _network)
 
             ret = True
@@ -192,9 +195,12 @@ class Domain:
                 if self.groups.index(node.tag) and not self._is_subnet(node.getparent().get("network"), kwargs["network"]):
                     # if node_type is not first in group and node is not subnet of parent node network
                     return ret
+                if not self._is_unique_amongst_siblings(network=kwargs["network"], parent=node.getparent()):
+                    # figure out a way to run this once for network and name fields
+                    return ret
                 node.set("network", kwargs["network"])
                 ret = node
-            if "name" in kwargs:
+            if "name" in kwargs and self._is_unique_amongst_siblings(name=kwargs["name"], parent=node.getparent()):
                 node.set("name", kwargs["name"])
                 ret = node
 

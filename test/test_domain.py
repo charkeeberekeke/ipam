@@ -105,6 +105,21 @@ class TestDomain:
         self.reset()
         node = self.domain.get_node(node_type="Region", name="Australia")
         node = self.domain.set_node(node[0], network="10.32.0.0/16")
+    
+    def test_set_node_change_network_3(self):
+        self.reset()
+        parent = self.domain.get_node(node_type="Region", name="Australia")
+        child1 = self.domain.add_node(node_type="City", name="Perth", network="10.12.0.0/16", parent=parent[0])
+        child2 = self.domain.add_node(node_type="City", name="Newcastle", network="10.10.0.0/16", parent=parent[0])
+        node = self.domain.set_node(child1, network="10.0.0.0/20")
+        print node
+    
+    @raises(DuplicateSiblingError)
+    def test_set_node_change_name_2(self):
+        self.reset()
+        parent = self.domain.get_node(node_type="Region", name="Australia")
+        child1 = self.domain.add_node(node_type="City", name="Perth", network="10.12.0.0/19", parent=parent[0])
+        node = self.domain.set_node(child1, name="brisbane")
 
     @raises(ConfirmDeleteNodeError)
     def test_remove_node_1(self):
