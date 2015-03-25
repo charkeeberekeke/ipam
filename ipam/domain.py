@@ -34,33 +34,23 @@ class Domain:
     Container class for domain object with an etree representation of xml structure of nodes and networks
     """
 
-    def __init__(self, domain=None, groups=None, path_to_xml=None):
+    def __init__(self, domain=None, groups=None, xml_file=None):
         """
         Initialize object with domain name. Class will open xml file with name 'domain.xml'. 
         If no file is present, set file object none
         and initialize tree structure
         """
-        self.file = None
+        self.xml_file = xml_file
         self.domain = domain
-        self.path_to_xml = path_to_xml
         self.groups = groups or []
         self.root = None
 
-        if self.path_to_xml:
-            self.file = os.path.join(self.path_to_xml, "%s.xml" % domain)
-            try:
-                # parse xml file and extract domain name from root element with tag domain
-                # set self.domain to extracted domain as well as self.file as file
-                # set self.root to tree root
-                # exit __init__
-                pass
-            except IOError:  # insert XMLparsingerror
-                pass
-
-        if self.domain:
+        if self.xml_file:
+            # will throw IOError for invalid xml_file, to be caught by Domain caller
+            self.root = etree.parse(self.xml_file).getroot()
+            self.domain = self.root.get("name")
+        elif self.domain:
             self.root = etree.Element("domain", name=self.domain)
-            if self.path_to_xml:
-                self.file = os.path.join(self.path_to_xml, "%s.xml" % domain)
         else:
             self.root = etree.Element("domain")
 
@@ -79,12 +69,18 @@ class Domain:
         else:
             return net
 
+    def save(self, xml_file=None):
+        # save etree xml to designated file
+        xml = etree.tostring(self.root, pretty_print=True, xml_declaration=True, encoding="UTF-8")
+        with open(xml_file, "w") as f:
+            f.write(xml)
+
     def _is_subnet(self, supernet, net, raise_exception=True):
         """
         Tests if net is subnet of supernet.
         Does the native test in IPv4Address as well as ensure net prefix is longer than supernet
         """
-        need to change default network, 0.0.0.0/0 introduces subtle issues
+        #need to change default network, 0.0.0.0/0 introduces subtle issues
         _super = IPv4Network(supernet)
         _net = IPv4Network(net)
         #return (_net in _super) and (_net.prefixlen > _super.prefixlen)
@@ -96,28 +92,31 @@ class Domain:
             else:
                 return False
 
-    def _is_unique_amongst_siblings(self, name="", network="0.0.0.0/0", parent=None):
+#    def _is_unique_amongst_siblings(self, name="", network="0.0.0.0/0", parent=None):
+    def _is_unique_amongst_siblings(self, parent=None, **kwargs):
         """
         determines whether provided name and network (non-overlapping) are unique among given parent's children nodes
         network parameter should already be validated by calling function add_node
         name comparision is case-insensitive
         """
-        ret = False
-        if isinstance(parent, etree._Element):
-            test_name = name.lower()
-            for s in parent:
-                _name = s.get("name")
-                _network = s.get("network")
-                if test_name == _name.lower():
-                    raise DuplicateSiblingError("name:%s" % name)
-                if (self._is_subnet(s.get("network"), network, raise_exception=False)
-                    or self._is_subnet(network, s.get("network"), raise_exception=False)
-                    or (IPv4Network(network) == IPv4Network(_network))):
-                    raise DuplicateSiblingError("network:%s" % _network)
+        if not isinstance(parent, etree._Element):
+            return False
 
-            ret = True
-
-        return ret    
+        for k, v in kwargs.items():
+            condition = "test_%s" % k
+            test_name = lambda x: v.lower() == x.get(k).lower()
+            test_network = lambda x: any([self._is_subnet(v, x.get(k), raise_exception=False),
+                                        self._is_subnet(x.get(k), v, raise_exception=False),
+                                        IPv4Network(v) == IPv4Network(x.get(k))])
+            if condition in locals().keys():
+                test = locals().get(condition)
+#                if any(map(test, parent)):
+#                    raise DuplicateSiblingError(k)  # disadvantage is not getting the parent member that failed the test
+                for s in parent:
+                    if test(s):
+                        raise DuplicateSiblingError("%s:%s" % (k, s.get(k)))
+                
+        return True
 
     def add_node(self, node_type=None, parent=None, name="", network=""):
         """
