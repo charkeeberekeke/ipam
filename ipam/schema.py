@@ -16,15 +16,23 @@ class Schema:
     """
     Container class for schema file for domains
     """
-    def __init__(self, file=None):
+    def __init__(self, file=None, json_str=""):
         """
         Open schema file containing domain definitions
         """
         self.file = file
-        try:
-            self.domains = self.file and json.load(open(self.file)) or {}
-        except IOError as e:
-            self.domains = {}
+        self.json_str = json_str
+        self.domains = {}
+        if json_str:
+            try:
+                self.domains = json.loads(self.json_str)
+            except:
+                pass
+        elif self.file:
+            try:
+                self.domains = self.file and json.load(open(self.file)) or {}
+            except IOError as e:
+                pass
 
     def new_domain(self, domain):
         """
@@ -67,3 +75,5 @@ class Schema:
                     raise InvalidGroupError
         else:
             raise InvalidDomainError
+
+        self.domains = domain

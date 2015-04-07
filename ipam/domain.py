@@ -1,6 +1,9 @@
+import time
+
 from lxml import etree
 from schema import *
 from ipaddr import IPv4Address, IPv4Network
+import redis
 
 """
 snippet for pathnames
@@ -34,30 +37,75 @@ class Domain:
     Container class for domain object with an etree representation of xml structure of nodes and networks
     """
 
-    def __init__(self, domain=None, groups=None, xml_file=None):
+    def __init__(self, domain=None, groups=None, xml_file=None, raw_xml="", schema=None, schema_name=""):
+#    def __init__(self, domain=None, schema=None, xml_file=None, raw_xml=""):
         """
         Initialize object with domain name. Class will open xml file with name 'domain.xml'. 
         If no file is present, set file object none
         and initialize tree structure
         """
         self.xml_file = xml_file
+        self.raw_xml = raw_xml
         self.domain = domain
-        self.groups = groups or []
+        self.groups = groups and groups[:] or []
+        self.groups.insert(0, "domain")
         self.root = None
+        self.timestamp = str(int(time.time()))
+        self.version = 1
+        self.schema_name = schema_name
+        self.schema = schema
 
-        if self.xml_file:
+        if self.raw_xml:
+            self.root = etree.fromstring(raw_xml)
+            self.domain = self.root.get("name")
+            self.version = self.root.get("version")
+            self.timestamp = self.root.get("timestamp")
+            self.schema_name = self.root.get("schema")
+            self.groups = self.schema and self.groups.extend(self.schema.get_groups(self.schema_name)) or self.groups
+        elif self.xml_file:
             # will throw IOError for invalid xml_file, to be caught by Domain caller
             self.root = etree.parse(self.xml_file).getroot()
             self.domain = self.root.get("name")
+            self.version = self.root.get("version")
+            self.timestamp = self.root.get("timestamp")
+            self.schema_name = self.root.get("schema")
         elif self.domain:
-            self.root = etree.Element("domain", name=self.domain)
+            self.root = etree.Element("domain", name=self.domain, timestamp=self.timestamp, version=str(self.version), schema=schema_name)
         else:
-            self.root = etree.Element("domain")
+            self.root = etree.Element("domain", schema=schema_name)
+
+        self.root.set("network", "0.0.0.0/0")
+
+    def validate(self, node=None):
+        """
+        Validate entire domain tree according to add_node validation checks
+        """
+        node = node or self.root
+        for n in node.getchildren(): 
+            index = node.index(n)
+            node.remove(n)
+            ret = self.add_node(parent=node, name=n.get("name"),
+                    network=n.get("network"), node_type=n.tag, validate_only=True)
+            if ret is not None: 
+                if len(n) != 0:
+                    if not self.validate(node=n):
+                        node.insert(index, n)
+                        return False
+            else:
+                node.insert(index, n)
+                return False
+
+            node.insert(index, n)
+
+        return True
+
+    def __repr__(self):
+        return "%s:%s" % (self.domain, self.version)
 
     def _validated_ip(self, ip):
         """
         Validates IP address argument
-        Accepts ip address in string format, returns None if invalid ip
+        Accepts ip address in string format, raises InvalidIPError exception if IP is invalid
         otherwise return IPv4Network object representing ip
         """
         ip = (ip == "") and "0.0.0.0/0" or ip
@@ -69,16 +117,59 @@ class Domain:
         else:
             return net
 
+    def version(self):
+        return self.version
+
+    def timestamp(self):
+        return self.timestamp
+
+    def xml(self):
+        #        return etree.tostring(self.root, pretty_print=True)
+        return etree.tostring(self.root)
+
     def save(self, xml_file=None):
-        # save etree xml to designated file
+        """
+        Save etree xml to designated file
+        """
+        # add logic in performing write only if data was changed
+        self.version += 1
+        self.timestamp = str(int(time.time()))
+        self.root.set("version", str(self.version))
+        self.root.set("timestamp", self.timestamp)
         xml = etree.tostring(self.root, pretty_print=True, xml_declaration=True, encoding="UTF-8")
         with open(xml_file, "w") as f:
             f.write(xml)
+
+    def save_to_db(self, db=None):
+        """
+        Save to redis db
+        Validate first if saved copy exists in redis and if saved version is more recent
+        """
+        if isinstance(db, redis.client.StrictRedis) and db.ping():
+            name = "ipam:domain:%s" % self.domain
+            tmp = db.get(name)
+            if tmp is not None:
+                tmp = Domain(raw_xml=tmp)
+                if tmp.version() != self.version:
+                    # raise exception about saved version not equal to new version
+                    return False
+                else:
+                    self.version = str(int(self.version) + 1)
+            self.timestamp = str(int(time.time()))
+            self.root.set("version", str(self.version))
+            self.root.set("timestamp", self.timestamp)
+        #    xml = etree.tostring(self.root, pretty_print=True, xml_declaration=True, encoding="UTF-8")
+            xml = etree.tostring(self.root)
+            db.set(name, xml)
+            return True
+
+        return False
 
     def _is_subnet(self, supernet, net, raise_exception=True):
         """
         Tests if net is subnet of supernet.
         Does the native test in IPv4Address as well as ensure net prefix is longer than supernet
+        Will raise exception if net is not a subnet of supernet by default, can be set to return False
         """
         #need to change default network, 0.0.0.0/0 introduces subtle issues
         _super = IPv4Network(supernet)
@@ -92,10 +183,9 @@ class Domain:
             else:
                 return False
 
-#    def _is_unique_amongst_siblings(self, name="", network="0.0.0.0/0", parent=None):
     def _is_unique_amongst_siblings(self, parent=None, **kwargs):
         """
-        determines whether provided name and network (non-overlapping) are unique among given parent's children nodes
+        Determines whether provided name and network (non-overlapping) are unique among given parent's children nodes
         network parameter should already be validated by calling function add_node
         name comparision is case-insensitive
         """
@@ -110,15 +200,13 @@ class Domain:
                                         IPv4Network(v) == IPv4Network(x.get(k))])
             if condition in locals().keys():
                 test = locals().get(condition)
-#                if any(map(test, parent)):
-#                    raise DuplicateSiblingError(k)  # disadvantage is not getting the parent member that failed the test
                 for s in parent:
                     if test(s):
                         raise DuplicateSiblingError("%s:%s" % (k, s.get(k)))
                 
         return True
 
-    def add_node(self, node_type=None, parent=None, name="", network=""):
+    def add_node(self, node_type=None, parent=None, name="", network="", validate_only=False):
         """
         Add node into the tree. Node type must conform to the schema.
         Return element represeting the node
@@ -136,16 +224,23 @@ class Domain:
             (2) node_type is direct descendant/child of parent node_type
             (3) network is a subnet of parent network
             (4) name/network is unique amongst siblings
+            currently adding node with no parent works if parent is domain element.
+            will change this such that domain is the first element of groups and that adding a node after parent requires
+            setting parent paremeter to self.root
             """
-            if (isinstance(parent, etree._Element) and (self.groups.index(node_type) == self.groups.index(parent.tag) + 1) 
-                    and self._is_subnet(parent.get("network"), network) and self._is_unique_amongst_siblings(name=name, network=network, parent=parent)):
+            if (isinstance(parent, etree._Element) 
+                    and (self.groups.index(node_type) == self.groups.index(parent.tag) + 1) 
+                    and self._is_subnet(parent.get("network"), network) 
+                    and self._is_unique_amongst_siblings(name=name, network=network, parent=parent)):
                 child = etree.Element(node_type, name=name, network=network)
-                parent.append(child)
+                if not validate_only:
+                    parent.append(child)
             elif parent is None:
                 if self.groups.index(node_type) != 0:
                     raise CantAddParentlessNodeError(node_type)
                 child = etree.Element(node_type, name=name, network=network)
-                self.root.append(child)
+                if not validate_only:
+                    self.root.append(child)
 
         return child
 
@@ -166,6 +261,9 @@ class Domain:
         return node
 
     def _search_network(self, network, node):
+        """
+        Return node for a given network
+        """
         for c in node.getchildren():
             try:
                 if self._is_subnet(c.get("network"), network):
@@ -175,7 +273,7 @@ class Domain:
 
         return node
         
-    def set_node(self, node=None, **kwargs):
+    def set_node(self, node=None, validate_only=False, **kwargs):
         """
         Change given node according to new properties set in kwargs
         Can change node name safely
@@ -197,15 +295,20 @@ class Domain:
                 if not self._is_unique_amongst_siblings(network=kwargs["network"], parent=node.getparent()):
                     # figure out a way to run this once for network and name fields
                     return ret
-                node.set("network", kwargs["network"])
+                if not validate_only:
+                    node.set("network", kwargs["network"])
                 ret = node
             if "name" in kwargs and self._is_unique_amongst_siblings(name=kwargs["name"], parent=node.getparent()):
-                node.set("name", kwargs["name"])
+                if not validate_only:
+                    node.set("name", kwargs["name"])
                 ret = node
 
         return ret
 
     def remove_node(self, node=None, force=False):
+        """
+        Remove given node, will raise exception if force argument is set to False
+        """
         ret = None
         if isinstance(node, etree._Element):
             if not force:
