@@ -161,3 +161,12 @@ class TestDomain:
         eq_(self.domain.version, (init_version + 1))
         os.remove(test_file)
 
+
+    def test_get_available_networks(self):
+        self.reset()
+        parent = self.domain.add_node(node_type="Region", name="Asia", network="10.16.0.0/12", parent=self.domain.root)
+        child1 = self.domain.add_node(node_type="City", name="Shanghai", network="10.16.0.0/19", parent=parent)
+        child2 = self.domain.add_node(node_type="City", name="Beijing", network="10.17.0.0/19", parent=parent)
+        #print self.domain.get_available_networks(node=parent, prefixlen=19)
+        print self.domain.get_available_networks(node=parent, prefixlen=22, number=5)
+        #print self.domain.get_available_networks(node=parent)

@@ -318,8 +318,40 @@ class Domain:
 
         return ret
 
-    def get_available_networks(self, node=None, prefixlen=None):
+    def get_available_networks(self, node=None, prefixlen=None, number=10):
         """
         Return list of available networks from a given node with subnet mask equal to prefixlen
         """
-        pass
+        child_nws = []
+        for n in node:
+            child_nws.append(IPv4Network(n.get("network")))
+
+        all_free_nws = self.__get_free_networks(IPv4Network(node.get("network")), child_nws)
+
+        if prefixlen:
+            free_nws = []
+            for nw in all_free_nws:
+                if nw.prefixlen <= prefixlen:
+                    _nw = nw.iter_subnets(new_prefix=prefixlen)
+                    try:
+                        while len(free_nws) <= number:
+                            free_nws.append(_nw.next())
+                    except StopIteration:
+                        continue
+            return free_nws
+        else:
+            return all_free_nws
+                            
+    def __get_free_networks(self, parent, children):
+        """
+        Return list of available networks from a parent supernet minus a list of subnets
+        """
+        nws = [parent]
+        for c in children:
+            _nws = nws[:]
+            for _nw in _nws:
+                if c in _nw:
+                    nws.remove(_nw)
+                    nws.extend(_nw.address_exclude(c))
+                    break
+        return nws
