@@ -14,16 +14,7 @@ def get_domain(domain_name):
         abort(404)
     return dom 
 
-@app.route("/ipam/api/v1.0/schema/<schema_name>", methods=["GET"])
-def get_schema(schema_name):
-    schema = Schema(json_str=db.get(SCHEMA_NAME))
-    try:
-        ret = schema.get_groups(schema_name)
-    except Exception, e:
-        print e
-    return jsonify({schema_name : ret})
-
-@app.route("/ipam/api/v1.0/domain/<domain_name>", methods=["POST"])
+@app.route("/ipam/api/v1.0/domain/<domain_name>", methods=["POST","UPDATE"])
 def new_domain(domain_name):
     """
     Format is json with 2 fields:
@@ -34,6 +25,8 @@ def new_domain(domain_name):
         abort(400)
     schema = Schema(json_str=db.get(SCHEMA_NAME))
     dom = ipamdomain.Domain(raw_xml=request.data, schema=schema)
+    # need to verify if domain already exists in redis, abort if yes
+    # need to validate input domain, abort if validation fails
     dom.save_to_db(db)
     return jsonify({"domain" : str(dom)})
 
@@ -54,6 +47,16 @@ def new_schema(schema_name):
 
     db.set(SCHEMA_NAME, json.dumps(schema.domains))
     return jsonify(request.json)
+
+@app.route("/ipam/api/v1.0/schema/<schema_name>", methods=["GET"])
+def get_schema(schema_name):
+    schema = Schema(json_str=db.get(SCHEMA_NAME))
+    try:
+        ret = schema.get_groups(schema_name)
+    except Exception, e:
+        print e
+    return jsonify({schema_name : ret})
+
 
 @app.errorhandler(404)
 def not_found(error):

@@ -60,7 +60,6 @@ class Schema:
             self.domains[domain] = groups
         except KeyError:
             raise DomainDoesNotExistError                                                                                                                             
-
     def save(self):
         try:
             json.dump(self.domains, open(self.file, "w"))

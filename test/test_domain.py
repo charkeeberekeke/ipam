@@ -3,13 +3,14 @@ import json
 import sys
 
 from nose.tools import ok_, eq_, raises, with_setup
-
 from lxml import etree
 
 try:
     from ipam.domain import *
+    from ipamrest import app
 except ImportError:
     sys.path.append(os.path.abspath(".."))
+    from ipamrest import app
     from ipam.domain import *
 
 class TestDomain:
@@ -26,18 +27,22 @@ class TestDomain:
         parent = self.domain.add_node(node_type="Region", name="Australia", network="10.0.0.0/12", parent=self.domain.root)
         self.domain.add_node(node_type="City", name="Brisbane", network="10.0.0.0/19", parent=parent)
 
+    def setup_flask(self):
+        app.config["TESTING"] = True
+        self.app = app.test_client()
+
     def test_create_domain(self):
-        eq_(self.domain.domain, self.domain.root.get('name'))
+        eq_(self.domain.domain, self.domain.root.text)
 
     def test_create_node_1(self):
         node = self.domain.add_node(node_type="Region", name="Australia", network="10.0.0.0/12", parent=self.domain.root)
-        ok_(self.domain.root[0] == node)
+        ok_(self.domain.root[0][0] == node)
 
     @raises(InvalidNodeTypeError)
     def test_create_node_2(self):
         self.domain.add_node(node_type="Error", name="Europe")
 
-    @raises(CantAddParentlessNodeError)
+    @raises(InvalidNodeTypeError)
     def test_create_node_3(self):
         self.domain.add_node(node_type="City", name="Melbourne")
 
@@ -76,7 +81,7 @@ class TestDomain:
     def test_child_subnet_validate2(self):
         parent = self.domain.add_node(node_type="Region", name="Africa", network="10.32.0.0/12", parent=self.domain.root)
         node = self.domain.add_node(node_type="City", name="South Africa", network="10.32.0.0/12", parent=parent)
-        ok_(node.get("network") == "10.32.0.0/12")
+        ok_(node.get("data-network") == "10.32.0.0/12")
 
     def test_child_subnet_validate3(self):
         parent = self.domain.add_node(node_type="Region", name="Canada", network="", parent=self.domain.root)
@@ -92,7 +97,7 @@ class TestDomain:
         self.reset()
         node = self.domain.get_node(node_type="City", name="Brisbane")
         node = self.domain.set_node(node[0], name="Perth")
-        eq_(node.get("name"), "Perth")
+        eq_(node.text, "Perth")
 
     @raises(AssignedIPnotinSubnet)
     def test_set_node_change_network_1(self):
@@ -161,3 +166,82 @@ class TestDomain:
         eq_(self.domain.version, (init_version + 1))
         os.remove(test_file)
 
+    # test malformed domains both in file and raw xml forms
+
+    def test_validate(self):
+        xml = """
+        <div data-schema="Sedgman" data-timestamp="1429652545" data-version="1" data-network="0.0.0.0/0" class="domain">Sedgman<ul>
+        <li class="Region" data-network="10.0.0.0/12">Australia<ul>
+        <li class="City" data-network="10.0.0.0/19">Brisbane</li>
+        <li class="City" data-network="10.15.0.0/19">Springfield</li>
+        <li class="City" data-network="10.14.0.0/16">Brisbane DMZ</li>
+        <li class="City" data-network="10.1.0.0/19">Perth</li>
+        </ul>
+        </li>
+        <li class="Region" data-network="10.64.0.0/12">Chile</li>
+        </ul>
+        </div>
+        """
+        with open("tmp", "w") as f:
+            f.write(xml)
+        self.domain = Domain(xml_file="tmp", schema=self.schema)
+        ok_(self.domain.validate())
+        ok_(self.domain.version == 1)
+        ok_(self.domain.domain == "Sedgman")
+
+    @raises(InvalidNodeTypeError)
+    def test_validate_2(self):
+        xml = """
+        <div data-schema="Sedgman" data-timestamp="1429652545" data-version="1" data-network="0.0.0.0/0" class="domain">Sedgman<ul>
+        <li class="Region" data-network="10.0.0.0/12">Australia<ul>
+        <li class="City" data-network="10.0.0.0/19">Brisbane</li>
+        <li class="City" data-network="10.15.0.0/19">Springfield</li>
+        <li class="City" data-network="10.14.0.0/16">Brisbane DMZ</li>
+        <li class="City" data-network="10.1.0.0/19">Perth</li>
+        </ul>
+        </li>
+        <li class="Region" data-network="10.64.0.0/12">Chile</li>
+        <li class="Town" data-network="10.96.0.0/12">Shanghai</li>
+        </ul>
+        </div>
+        """
+        with open("tmp", "w") as f:
+            f.write(xml)
+        self.domain = Domain(xml_file="tmp", schema=self.schema)
+        self.domain.validate()
+
+    def test_validate_3(self):
+        xml = """
+        <div data-schema="Sedgman" data-timestamp="1429652545" data-version="1" data-network="0.0.0.0/0" class="domain">Sedgman<ul>
+        <li class="Region" data-network="10.0.0.0/12">Australia<ul>
+        <li class="City" data-network="10.0.0.0/19">Brisbane</li>
+        <li class="City" data-network="10.15.0.0/19">Springfield</li>
+        <li class="City" data-network="10.14.0.0/16">Brisbane DMZ</li>
+        <li class="City" data-network="10.1.0.0/19">Perth</li>
+        </ul>
+        </li>
+        <li class="Region" data-network="10.64.0.0/12">Chile</li>
+        </ul>
+        </div>
+        """
+        self.domain = Domain(raw_xml=xml, schema=self.schema)
+        ok_(self.domain.validate())
+
+    @raises(InvalidNodeTypeError)
+    def test_validate_4(self):
+        xml = """
+        <div data-schema="Sedgman" data-timestamp="1429652545" data-version="1" data-network="0.0.0.0/0" class="domain">Sedgman<ul>
+        <li class="Region" data-network="10.0.0.0/12">Australia<ul>
+        <li class="City" data-network="10.0.0.0/19">Brisbane</li>
+        <li class="City" data-network="10.15.0.0/19">Springfield</li>
+        <li class="City" data-network="10.14.0.0/16">Brisbane DMZ</li>
+        <li class="City" data-network="10.1.0.0/19">Perth</li>
+        </ul>
+        </li>
+        <li class="Region" data-network="10.64.0.0/12">Chile</li>
+        <li class="Town" data-network="10.96.0.0/12">Shanghai</li>
+        </ul>
+        </div>
+        """
+        self.domain = Domain(raw_xml=xml, schema=self.schema)
+        self.domain.validate()
