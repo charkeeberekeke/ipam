@@ -322,7 +322,12 @@ class Domain:
         """
         Return list of available networks from a given node with subnet mask equal to prefixlen
         """
+
+        if not isinstance(node, etree._Element):
+            raise TypeError("Invalid node %s to get_available_networks" % str(node))
+
         child_nws = []
+
         for n in node:
             child_nws.append(IPv4Network(n.get("network")))
 
