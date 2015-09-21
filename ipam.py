@@ -7,6 +7,8 @@ db = redis.StrictRedis(host="localhost", port=6379, db=0)
 app = Flask(__name__)
 SCHEMA_NAME = "ipam:schema"
 
+
+#need to add authentication/authorization to the method
 @app.route("/ipam/api/v1.0/domain/<domain_name>", methods=["GET"])
 def get_domain(domain_name):
     dom = db.get("ipam:domain:%s" % domain_name)
@@ -14,6 +16,7 @@ def get_domain(domain_name):
         abort(404)
     return dom 
 
+#need to add authentication/authorization to the method
 @app.route("/ipam/api/v1.0/schema/<schema_name>", methods=["GET"])
 def get_schema(schema_name):
     schema = Schema(json_str=db.get(SCHEMA_NAME))
@@ -23,6 +26,7 @@ def get_schema(schema_name):
         print e
     return jsonify({schema_name : ret})
 
+#need to add authentication/authorization to the method
 @app.route("/ipam/api/v1.0/domain/<domain_name>", methods=["POST"])
 def new_domain(domain_name):
     """
@@ -37,6 +41,7 @@ def new_domain(domain_name):
     dom.save_to_db(db)
     return jsonify({"domain" : str(dom)})
 
+#need to add authentication/authorization to the method
 @app.route("/ipam/api/v1.0/schema/<schema_name>", methods=["POST"])
 def new_schema(schema_name):
     """
@@ -54,6 +59,28 @@ def new_schema(schema_name):
 
     db.set(SCHEMA_NAME, json.dumps(schema.domains))
     return jsonify(request.json)
+
+def del_domain(domain_name):
+    pass
+
+def del_schema(schema_name):
+    pass
+
+
+# node naming convention will be root>parent1>parent2>node or such format
+# to facilitate easy searching using lxml
+def add_node(domain, parent_node, network, name):
+    pass
+
+def set_node(domain, node, network=None, name=None):
+    pass
+
+def del_node(domain, node):
+    pass
+
+# ideally run this function clientside but will also make available in api
+def get_available_network(domain, node):
+    pass
 
 @app.errorhandler(404)
 def not_found(error):

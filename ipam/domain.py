@@ -76,6 +76,8 @@ class Domain:
 
         self.root.set("network", "0.0.0.0/0")
 
+        # run domain validation function
+
     def validate(self, node=None):
         """
         Validate entire domain tree according to add_node validation checks
