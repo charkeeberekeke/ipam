@@ -33,9 +33,11 @@ class TestSchema:
         self.schema.new_domain("domain30")
         ok_(isinstance(self.schema.get_groups("domain30"), list))
 
-    @raises(DomainDoesNotExistError)
+    #@raises(DomainDoesNotExistError)
     def test_cannot_get_group_from_nonexistent_domain(self):
-        self.schema.get_groups("domain30")
+        #self.schema.get_groups("domain30")
+        tmp = self.schema.get_groups("domain30")
+        ok_(self.schema.get_groups("domain30") == {})
 
     @raises(InvalidGroupError)
     def test_assert_domain_group_is_a_list(self):

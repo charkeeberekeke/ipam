@@ -1,12 +1,11 @@
-from flask import Flask, request, abort, jsonify, make_response
+from flask import Flask, request, abort, jsonify, make_response, g
 import redis
+import json
 from ipam.schema import *
 import ipam.domain as ipamdomain
 
-db = redis.StrictRedis(host="localhost", port=6379, db=0)
 app = Flask(__name__)
 SCHEMA_NAME = "ipam:schema"
-
 
 #need to add authentication/authorization to the method
 @app.route("/ipam/api/v1.0/domain/<domain_name>", methods=["GET"])
@@ -19,11 +18,22 @@ def get_domain(domain_name):
 #need to add authentication/authorization to the method
 @app.route("/ipam/api/v1.0/schema/<schema_name>", methods=["GET"])
 def get_schema(schema_name):
-    schema = Schema(json_str=db.get(SCHEMA_NAME))
+    schema = init_schema()
     try:
+#        schema = Schema(json_str=db.get(SCHEMA_NAME))
         ret = schema.get_groups(schema_name)
     except Exception, e:
-        print e
+        abort(400)
+    return jsonify({schema_name : ret})
+
+@app.route("/ipam/api/v1.0/schema/<schema_name>", methods=["DELETE"])
+def delete_schema(schema_name):
+    schema = init_schema()
+    try:
+#        schema = Schema(json_str=db.get(SCHEMA_NAME))
+        ret = schema.delete_domain(schema_name)
+    except:
+        abort(400)
     return jsonify({schema_name : ret})
 
 #need to add authentication/authorization to the method
@@ -47,24 +57,38 @@ def new_schema(schema_name):
     """
     Format is a dict in json format, with schema name as key and groups list as value
     """
-    if not request.json or not schema_name in request.json or not isinstance(request.json.get(schema_name), list):
-        abort(400)
+#    if not request.json or not schema_name in request.json or not isinstance(request.json.get(schema_name), list):
+#        abort(400)
+    schema = init_schema()
     try:
-        schema = Schema(json_str=db.get(SCHEMA_NAME))
-        print schema.domains
         schema.new_domain(schema_name)
         schema.update_domain(schema_name, request.json.get(schema_name))
+        #schema.update_domain(schema_name, request.form[schema_name])
+    except DomainAlreadyExistsError as e:
+        print "domainalreadyexists"
+        abort(400) # issue informative 404 page 
+    except InvalidGroupError as e:
+        pass
     except Exception as e:
-        abort(400)
+        pass
 
-    db.set(SCHEMA_NAME, json.dumps(schema.domains))
     return jsonify(request.json)
+
+@app.route("/")
+def test():
+    return "This is a test"
 
 def del_domain(domain_name):
     pass
 
 def del_schema(schema_name):
     pass
+
+def init_schema():
+    if not hasattr(g, 'db'):
+        g.db = redis.StrictRedis(host="localhost", port=6379, db=0)
+    schema = Schema(redisdb=g.db, schema_name=SCHEMA_NAME)
+    return schema
 
 
 # node naming convention will be root>parent1>parent2>node or such format
@@ -87,4 +111,8 @@ def not_found(error):
     return make_response(jsonify({"error" : "Not found"}))
 
 if __name__ == "__main__":
+    # check if redis is running
+    db = redis.StrictRedis(host="localhost", port=6379, db=0)
+    SCHEMA_NAME = "ipam:schema"
+    schema = Schema(redisdb=db, schema_name=SCHEMA_NAME)
     app.run(debug=True)
