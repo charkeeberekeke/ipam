@@ -56,6 +56,7 @@ class Domain:
         self.schema = schema
 
         if self.raw_xml:
+            # if input is xml in string format
             self.root = etree.fromstring(raw_xml)
             self.domain = self.root.get("name")
             self.version = self.root.get("version")
@@ -63,6 +64,7 @@ class Domain:
             self.schema_name = self.root.get("schema")
             self.groups = self.schema and self.groups.extend(self.schema.get_groups(self.schema_name)) or self.groups
         elif self.xml_file:
+            # if input is file containing xml
             # will throw IOError for invalid xml_file, to be caught by Domain caller
             self.root = etree.parse(self.xml_file).getroot()
             self.domain = self.root.get("name")
@@ -81,6 +83,7 @@ class Domain:
     def validate(self, node=None):
         """
         Validate entire domain tree according to add_node validation checks
+        Does a depth-first tree traversal
         """
         node = node or self.root
         for n in node.getchildren(): 
@@ -89,14 +92,17 @@ class Domain:
             ret = self.add_node(parent=node, name=n.get("name"),
                     network=n.get("network"), node_type=n.tag, validate_only=True)
             if ret is not None: 
+                # if n is valid node for node, run validate function on n  
                 if len(n) != 0:
                     if not self.validate(node=n):
                         node.insert(index, n)
                         return False
             else:
+                # n is not valid for node, insert n back on node and return False
                 node.insert(index, n)
                 return False
 
+            # complete validation by return current n to node and iterate on next n
             node.insert(index, n)
 
         return True
@@ -246,18 +252,24 @@ class Domain:
 
         return child
 
-    def get_node(self, node_type=None, name=None, network=None):
+#    def get_node(self, node_type=None, name=None, network=None):
+    def get_node(self, node_type="*", name=None, network=None):
         """
         Return node/s with given properties 
         """
         node = []
-        if node_type and (node_type in self.groups):
-            if name:
-                q = "//%s[@name='%s']" % (node_type, name)
-            else:
-                q = "//%s" % node_type
-            node = self.root.xpath(q)
-        elif network: # may need to improve the logic behind selection of name/nodetype vs network search
+#        print "Inside dom.get_node"
+#        print "node_type: %s" % node_type
+#        print "name: %s" % name
+#        print self.groups
+#        if node_type and (node_type in self.groups):
+        if name:
+            q = "//%s[@name='%s']" % (node_type, name)
+        else:
+            q = "//%s" % node_type
+        node = self.root.xpath(q)
+
+        if network: # may need to improve the logic behind selection of name/nodetype vs network search
             pass
 
         return node
